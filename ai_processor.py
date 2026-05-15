@@ -1,57 +1,56 @@
 import os
 import json
-import google.generativeai as genai
+from groq import Groq
 from dotenv import load_dotenv
 
 load_dotenv()
 
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel("gemini-2.0-flash")
+client = Groq(api_key=os.environ["GROQ_API_KEY"])
+MODEL = "llama-3.1-8b-instant"
 
 
 def analyze_markdown(content: str) -> dict:
     """
-    Sends the .md content to Gemini and gets back:
+    Sends the .md content to Groq/Llama and gets back:
     - summary: 2-3 sentence summary of key findings
     - topics: list of specific AI topics covered
     """
-    prompt = f"""You are analyzing a research note about AI written by a student for their paper.
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are analyzing research notes about AI written by students. "
+                    "Always respond with valid JSON only. No markdown, no explanation, nothing else."
+                )
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Analyze this markdown content and return a JSON object with exactly:\n"
+                    f"- \"summary\": A 2-3 sentence summary of the key findings (be specific and technical)\n"
+                    f"- \"topics\": A list of 3-6 specific AI topics covered "
+                    f"(e.g. \"transformer architecture\", \"RLHF\", \"attention mechanism\")\n\n"
+                    f"Content:\n{content[:4000]}"
+                )
+            }
+        ],
+        max_tokens=500,
+        temperature=0.3
+    )
 
-Analyze this markdown content and return a JSON object with exactly these two fields:
-- "summary": A 2-3 sentence summary of the key findings. Be specific and technical.
-- "topics": A list of 3-6 specific AI topics covered (e.g., "transformer architecture", "RLHF", "attention mechanism", "fine-tuning", "RAG")
+    text = response.choices[0].message.content.strip()
 
-Return ONLY valid JSON. No markdown code blocks, no explanation, nothing else.
-
-Content to analyze:
-{content}"""
-
-    response = model.generate_content(prompt)
-    text = response.text.strip()
-
-    # Clean up if Gemini wraps in markdown code blocks
+    # Clean up if model wraps in markdown code blocks
     if text.startswith("```"):
         lines = text.split("\n")
-        text = "\n".join(lines[1:-1])  # Remove first and last line
+        text = "\n".join(lines[1:-1])
 
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # Fallback if parsing fails
         return {
             "summary": "Could not parse summary. Please check the file format.",
             "topics": ["AI research"]
         }
-
-
-def generate_embedding(text: str) -> list:
-    """
-    Generates a 768-dimensional embedding vector for semantic search.
-    Used for both storing notes and searching.
-    """
-    result = genai.embed_content(
-        model="models/text-embedding-004",
-        content=text[:8000],  # Limit to avoid token issues
-        task_type="retrieval_document"
-    )
-    return result["embedding"]
