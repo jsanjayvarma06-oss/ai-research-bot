@@ -1,12 +1,18 @@
 import os
 import json
-from groq import Groq
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
-client = Groq(api_key=os.environ["GROQ_API_KEY"])
+GROQ_API_KEY = os.environ["GROQ_API_KEY"]
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "llama-3.1-8b-instant"
+
+HEADERS = {
+    "Authorization": f"Bearer {GROQ_API_KEY}",
+    "Content-Type": "application/json"
+}
 
 
 def analyze_markdown(content: str) -> dict:
@@ -15,9 +21,9 @@ def analyze_markdown(content: str) -> dict:
     - summary: 2-3 sentence summary of key findings
     - topics: list of specific AI topics covered
     """
-    response = client.chat.completions.create(
-        model=MODEL,
-        messages=[
+    payload = {
+        "model": MODEL,
+        "messages": [
             {
                 "role": "system",
                 "content": (
@@ -36,11 +42,14 @@ def analyze_markdown(content: str) -> dict:
                 )
             }
         ],
-        max_tokens=500,
-        temperature=0.3
-    )
+        "max_tokens": 500,
+        "temperature": 0.3
+    }
 
-    text = response.choices[0].message.content.strip()
+    response = requests.post(GROQ_URL, headers=HEADERS, json=payload)
+    response.raise_for_status()
+
+    text = response.json()["choices"][0]["message"]["content"].strip()
 
     # Clean up if model wraps in markdown code blocks
     if text.startswith("```"):
