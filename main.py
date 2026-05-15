@@ -190,7 +190,11 @@ def handle_help(message, say):
     )
 
 
-# ─── START ────────────────────────────────────────────────────────────────────
+# ─── CATCH-ALL — silences unhandled message warnings ──────────────────────────
+
+@app.event("message")
+def handle_all_messages(body, logger):
+    pass  # Ignore regular messages, channel joins, etc.
 
 if __name__ == "__main__":
     print("🚀 AI Research Bot is starting...")
