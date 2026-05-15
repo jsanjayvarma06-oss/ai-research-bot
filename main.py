@@ -15,55 +15,54 @@ app = App(token=os.environ["SLACK_BOT_TOKEN"])
 
 # ─── FILE UPLOAD HANDLER ───────────────────────────────────────────────────────
 
-@app.event("file_shared")
+@app.event({"type": "message", "subtype": "file_share"})
 def handle_file_shared(event, client, say):
     try:
-        file_id = event["file_id"]
-        file_info = client.files_info(file=file_id)
-        file = file_info["file"]
-
-        # Only process .md files
-        if not file["name"].endswith(".md"):
+        files = event.get("files", [])
+        if not files:
             return
 
-        # Get the author's name from Slack
-        user_id = file["user"]
+        user_id = event.get("user")
         user_info = client.users_info(user=user_id)
         author_name = user_info["user"]["real_name"]
 
-        say(f"📥 Got `{file['name']}` from *{author_name}*! Analyzing... hang tight ⏳")
+        for file in files:
+            if not file["name"].endswith(".md"):
+                continue
 
-        # Download the file content using the private URL
-        url = file["url_private_download"]
-        req = urllib.request.Request(
-            url,
-            headers={"Authorization": f"Bearer {os.environ['SLACK_BOT_TOKEN']}"}
-        )
-        ctx = ssl.create_default_context()
-        with urllib.request.urlopen(req, context=ctx) as response:
-            content = response.read().decode("utf-8")
+            say(f"📥 Got `{file['name']}` from *{author_name}*! Analyzing... hang tight ⏳")
 
-        # Analyze content with Groq
-        analysis = analyze_markdown(content)
+            # Download the file content
+            url = file["url_private_download"]
+            req = urllib.request.Request(
+                url,
+                headers={"Authorization": f"Bearer {os.environ['SLACK_BOT_TOKEN']}"}
+            )
+            ctx = ssl.create_default_context()
+            with urllib.request.urlopen(req, context=ctx) as response:
+                content = response.read().decode("utf-8")
 
-        # Save everything to Supabase
-        save_note(
-            author_name=author_name,
-            author_slack_id=user_id,
-            filename=file["name"],
-            raw_content=content,
-            summary=analysis["summary"],
-            topics=analysis["topics"]
-        )
+            # Analyze content with Groq
+            analysis = analyze_markdown(content)
 
-        topics_str = "  •  ".join(analysis["topics"])
-        say(
-            f"✅ *Saved to the research brain!*\n\n"
-            f"👤 *Author:* {author_name}\n"
-            f"📄 *File:* `{file['name']}`\n"
-            f"📝 *Summary:* {analysis['summary']}\n"
-            f"🏷️ *Topics:* {topics_str}"
-        )
+            # Save everything to Supabase
+            save_note(
+                author_name=author_name,
+                author_slack_id=user_id,
+                filename=file["name"],
+                raw_content=content,
+                summary=analysis["summary"],
+                topics=analysis["topics"]
+            )
+
+            topics_str = "  •  ".join(analysis["topics"])
+            say(
+                f"✅ *Saved to the research brain!*\n\n"
+                f"👤 *Author:* {author_name}\n"
+                f"📄 *File:* `{file['name']}`\n"
+                f"📝 *Summary:* {analysis['summary']}\n"
+                f"🏷️ *Topics:* {topics_str}"
+            )
 
     except Exception as e:
         say(f"❌ Something went wrong while processing the file: `{str(e)}`")
