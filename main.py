@@ -125,7 +125,7 @@ def handle_query(message, say, context):
 
 # ─── STATS HANDLER ────────────────────────────────────────────────────────────
 
-@app.message("!stats")
+@app.message(re.compile(r"^!stats$", re.IGNORECASE))
 def handle_stats(message, say):
     try:
         stats = get_stats()
@@ -144,7 +144,7 @@ def handle_stats(message, say):
 
 # ─── HELP HANDLER ─────────────────────────────────────────────────────────────
 
-@app.message("!all")
+@app.message(re.compile(r"^!all$", re.IGNORECASE))
 def handle_all(message, say):
     try:
         response = requests.get(
@@ -195,6 +195,23 @@ def handle_help(message, say):
 @app.event("message")
 def handle_all_messages(body, logger):
     pass  # Ignore regular messages, channel joins, etc.
+
+
+# ─── HELP HANDLER ─────────────────────────────────────────────────────────────
+
+@app.message(re.compile(r"^!help$", re.IGNORECASE))
+def handle_help(message, say):
+    say(
+        "👋 *AI Research Brain — Commands:*\n\n"
+        "📤 *Submit notes:* Upload a `.md` file in this channel\n"
+        "   → I'll analyze it, tag topics, and save it with your name\n\n"
+        "🔍 *Search:* `query <topic>` or `search <topic>`\n"
+        "   Example: `query transformer architecture`\n"
+        "   Example: `search reinforcement learning`\n\n"
+        "📋 *All submissions:* `!all` — see every note submitted by the team\n\n"
+        "📊 *Stats:* `!stats` — see how many notes and who contributed\n\n"
+        "❓ *Help:* `!help` — show this message"
+    )
 
 if __name__ == "__main__":
     print("🚀 AI Research Bot is starting...")
