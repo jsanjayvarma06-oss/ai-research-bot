@@ -1,155 +1,99 @@
 import os
-import re
-import urllib.request
-import ssl
-from slack_bolt import App
-from slack_bolt.adapter.socket_mode import SocketModeHandler
+import requests
+from collections import Counter
 from dotenv import load_dotenv
-from ai_processor import analyze_markdown, generate_embedding
-from database import save_note, search_notes, get_all_topics, get_stats
 
 load_dotenv()
 
-app = App(token=os.environ["SLACK_BOT_TOKEN"])
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+    "Prefer": "return=representation"
+}
 
 
-# ─── FILE UPLOAD HANDLER ───────────────────────────────────────────────────────
-
-@app.event("file_shared")
-def handle_file_shared(event, client, say):
-    try:
-        file_id = event["file_id"]
-        file_info = client.files_info(file=file_id)
-        file = file_info["file"]
-
-        # Only process .md files
-        if not file["name"].endswith(".md"):
-            return
-
-        # Get the author's name from Slack
-        user_id = file["user"]
-        user_info = client.users_info(user=user_id)
-        author_name = user_info["user"]["real_name"]
-
-        say(f"📥 Got `{file['name']}` from *{author_name}*! Analyzing... hang tight ⏳")
-
-        # Download the file content using the private URL
-        url = file["url_private_download"]
-        req = urllib.request.Request(
-            url,
-            headers={"Authorization": f"Bearer {os.environ['SLACK_BOT_TOKEN']}"}
-        )
-        ctx = ssl.create_default_context()
-        with urllib.request.urlopen(req, context=ctx) as response:
-            content = response.read().decode("utf-8")
-
-        # Analyze content with Gemini
-        analysis = analyze_markdown(content)
-        embedding = generate_embedding(content)
-
-        # Save everything to Supabase
-        save_note(
-            author_name=author_name,
-            author_slack_id=user_id,
-            filename=file["name"],
-            raw_content=content,
-            summary=analysis["summary"],
-            topics=analysis["topics"],
-            embedding=embedding
-        )
-
-        topics_str = "  •  ".join(analysis["topics"])
-        say(
-            f"✅ *Saved to the research brain!*\n\n"
-            f"👤 *Author:* {author_name}\n"
-            f"📄 *File:* `{file['name']}`\n"
-            f"📝 *Summary:* {analysis['summary']}\n"
-            f"🏷️ *Topics:* {topics_str}"
-        )
-
-    except Exception as e:
-        say(f"❌ Something went wrong while processing the file: `{str(e)}`")
-        print(f"Error in handle_file_shared: {e}")
-
-
-# ─── QUERY HANDLER ────────────────────────────────────────────────────────────
-
-@app.message(re.compile(r"^(query|search|find|what do we know about)\s+(.+)", re.IGNORECASE))
-def handle_query(message, say, context):
-    try:
-        query_text = context["matches"][1].strip()
-        user_id = message["user"]
-        user_info = app.client.users_info(user=user_id)
-        requester = user_info["user"]["real_name"]
-
-        say(f"🔍 *{requester}* is searching for: *{query_text}*...")
-
-        # Generate embedding for the query and search
-        query_embedding = generate_embedding(query_text)
-        results = search_notes(query_embedding, match_count=5)
-
-        if not results:
-            say(
-                f"😕 No relevant notes found for *{query_text}* yet.\n"
-                f"Keep submitting those `.md` files and build up the brain! 🧠"
-            )
-            return
-
-        response = f"📚 *Here's what the team knows about \"{query_text}\":*\n\n"
-        for i, note in enumerate(results, 1):
-            date = note["created_at"][:10]
-            topics = "  •  ".join(note["topics"]) if note["topics"] else "N/A"
-            response += (
-                f"*{i}. {note['author_name']}* — `{note['filename']}` _{date}_\n"
-                f"   {note['summary']}\n"
-                f"   🏷️ {topics}\n\n"
-            )
-
-        say(response)
-
-    except Exception as e:
-        say(f"❌ Search failed: `{str(e)}`")
-        print(f"Error in handle_query: {e}")
-
-
-# ─── STATS HANDLER ────────────────────────────────────────────────────────────
-
-@app.message("!stats")
-def handle_stats(message, say):
-    try:
-        stats = get_stats()
-        topics = get_all_topics()
-        top_topics = ", ".join(topics[:10]) if topics else "None yet"
-
-        say(
-            f"📊 *Research Brain Stats*\n\n"
-            f"📄 Total notes submitted: *{stats['total_notes']}*\n"
-            f"👥 Contributors: *{', '.join(stats['contributors']) if stats['contributors'] else 'None yet'}*\n"
-            f"🏷️ Top topics explored: {top_topics}"
-        )
-    except Exception as e:
-        say(f"❌ Couldn't fetch stats: `{str(e)}`")
-
-
-# ─── HELP HANDLER ─────────────────────────────────────────────────────────────
-
-@app.message("!help")
-def handle_help(message, say):
-    say(
-        "👋 *AI Research Brain — Commands:*\n\n"
-        "📤 *Submit notes:* Upload a `.md` file in this channel\n"
-        "   → I'll analyze it, tag topics, and save it with your name\n\n"
-        "🔍 *Search:* `query <topic>` or `search <topic>`\n"
-        "   Example: `query transformer architecture`\n"
-        "   Example: `search reinforcement learning`\n\n"
-        "📊 *Stats:* `!stats` — see how many notes and who contributed\n\n"
-        "❓ *Help:* `!help` — show this message"
+def save_note(author_name, author_slack_id, filename, raw_content, summary, topics):
+    """Save a processed research note to Supabase via REST API."""
+    data = {
+        "author_name": author_name,
+        "author_slack_id": author_slack_id,
+        "filename": filename,
+        "raw_content": raw_content,
+        "summary": summary,
+        "topics": topics
+    }
+    response = requests.post(
+        f"{SUPABASE_URL}/rest/v1/research_notes",
+        headers=HEADERS,
+        json=data
     )
+    response.raise_for_status()
+    return response.json()
 
 
-# ─── START ────────────────────────────────────────────────────────────────────
+def search_notes(query_text: str, match_count: int = 5) -> list:
+    """Full-text search using PostgreSQL tsvector via Supabase REST API."""
+    # Use Supabase's built-in full-text search
+    search_headers = {**HEADERS, "Prefer": ""}
+    response = requests.get(
+        f"{SUPABASE_URL}/rest/v1/research_notes",
+        headers=search_headers,
+        params={
+            "select": "id,author_name,filename,summary,topics,created_at",
+            "search_vector": f"fts.{query_text}",
+            "limit": match_count,
+            "order": "created_at.desc"
+        }
+    )
+    response.raise_for_status()
+    results = response.json()
 
-if __name__ == "__main__":
-    print("🚀 AI Research Bot is starting...")
-    handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
-    handler.start()
+    # Fallback: if fts returns nothing, do a simple ilike search on summary
+    if not results:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/research_notes",
+            headers=search_headers,
+            params={
+                "select": "id,author_name,filename,summary,topics,created_at",
+                "summary": f"ilike.*{query_text}*",
+                "limit": match_count
+            }
+        )
+        response.raise_for_status()
+        results = response.json()
+
+    return results if results else []
+
+
+def get_all_topics() -> list:
+    """Get a flat list of all unique topics sorted by frequency."""
+    response = requests.get(
+        f"{SUPABASE_URL}/rest/v1/research_notes?select=topics",
+        headers=HEADERS
+    )
+    response.raise_for_status()
+    all_topics = []
+    for row in response.json():
+        if row.get("topics"):
+            all_topics.extend(row["topics"])
+    counter = Counter(all_topics)
+    return [topic for topic, _ in counter.most_common()]
+
+
+def get_stats() -> dict:
+    """Get total notes count and unique contributors."""
+    response = requests.get(
+        f"{SUPABASE_URL}/rest/v1/research_notes?select=author_name",
+        headers=HEADERS
+    )
+    response.raise_for_status()
+    data = response.json()
+    contributors = list(set(row["author_name"] for row in data))
+    return {
+        "total_notes": len(data),
+        "contributors": contributors
+    }
