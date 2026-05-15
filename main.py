@@ -38,24 +38,8 @@ def handle_file_message(event, client, say):
 
 @app.event("file_shared")
 def handle_file_shared(event, client, say):
-    try:
-        file_id = event["file_id"]
-        user_id = event.get("user_id")
-
-        file_info = client.files_info(file=file_id)
-        file = file_info["file"]
-
-        if not file["name"].endswith(".md"):
-            return
-
-        user_info = client.users_info(user=user_id)
-        author_name = user_info["user"]["real_name"]
-
-        process_file(file, author_name, user_id, client, say)
-
-    except Exception as e:
-        say(f"❌ Something went wrong: `{str(e)}`")
-        print(f"Error in handle_file_shared: {e}")
+    # Handled by the message file_share event — ignore this to prevent duplicates
+    pass
 
 
 def process_file(file, author_name, user_id, client, say):
