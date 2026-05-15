@@ -2,6 +2,7 @@ import os
 import re
 import urllib.request
 import ssl
+import requests
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from dotenv import load_dotenv
@@ -11,6 +12,14 @@ from database import save_note, search_notes, get_all_topics, get_stats
 load_dotenv()
 
 app = App(token=os.environ["SLACK_BOT_TOKEN"])
+
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json"
+}
 
 
 # ─── FILE UPLOAD HANDLER ───────────────────────────────────────────────────────
@@ -135,7 +144,38 @@ def handle_stats(message, say):
 
 # ─── HELP HANDLER ─────────────────────────────────────────────────────────────
 
-@app.message("!help")
+@app.message("!all")
+def handle_all(message, say):
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/research_notes",
+            headers=HEADERS,
+            params={
+                "select": "author_name,filename,summary,topics,created_at",
+                "order": "created_at.desc"
+            }
+        )
+        response.raise_for_status()
+        notes = response.json()
+
+        if not notes:
+            say("📭 No submissions yet. Upload a `.md` file to get started!")
+            return
+
+        reply = f"📋 *All submissions so far ({len(notes)} total):*\n\n"
+        for i, note in enumerate(notes, 1):
+            date = note["created_at"][:10]
+            topics = "  •  ".join(note["topics"]) if note["topics"] else "N/A"
+            reply += (
+                f"*{i}. {note['author_name']}* — `{note['filename']}` _{date}_\n"
+                f"   {note['summary']}\n"
+                f"   🏷️ {topics}\n\n"
+            )
+
+        say(reply)
+
+    except Exception as e:
+        say(f"❌ Couldn't fetch submissions: `{str(e)}`")
 def handle_help(message, say):
     say(
         "👋 *AI Research Brain — Commands:*\n\n"
@@ -144,6 +184,7 @@ def handle_help(message, say):
         "🔍 *Search:* `query <topic>` or `search <topic>`\n"
         "   Example: `query transformer architecture`\n"
         "   Example: `search reinforcement learning`\n\n"
+        "📋 *All submissions:* `!all` — see every note submitted by the team\n\n"
         "📊 *Stats:* `!stats` — see how many notes and who contributed\n\n"
         "❓ *Help:* `!help` — show this message"
     )
