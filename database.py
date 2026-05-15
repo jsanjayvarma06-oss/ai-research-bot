@@ -36,37 +36,22 @@ def save_note(author_name, author_slack_id, filename, raw_content, summary, topi
 
 
 def search_notes(query_text: str, match_count: int = 5) -> list:
-    """Full-text search using PostgreSQL tsvector via Supabase REST API."""
-    # Use Supabase's built-in full-text search
+    """Search notes using ilike on summary and raw_content."""
     search_headers = {**HEADERS, "Prefer": ""}
+
+    # Search in summary first
     response = requests.get(
         f"{SUPABASE_URL}/rest/v1/research_notes",
         headers=search_headers,
         params={
             "select": "id,author_name,filename,summary,topics,created_at",
-            "search_vector": f"fts.{query_text}",
+            "or": f"(summary.ilike.*{query_text}*,raw_content.ilike.*{query_text}*)",
             "limit": match_count,
             "order": "created_at.desc"
         }
     )
     response.raise_for_status()
-    results = response.json()
-
-    # Fallback: if fts returns nothing, do a simple ilike search on summary
-    if not results:
-        response = requests.get(
-            f"{SUPABASE_URL}/rest/v1/research_notes",
-            headers=search_headers,
-            params={
-                "select": "id,author_name,filename,summary,topics,created_at",
-                "summary": f"ilike.*{query_text}*",
-                "limit": match_count
-            }
-        )
-        response.raise_for_status()
-        results = response.json()
-
-    return results if results else []
+    return response.json() if response.json() else []
 
 
 def get_all_topics() -> list:
