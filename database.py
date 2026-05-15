@@ -16,7 +16,7 @@ HEADERS = {
 }
 
 
-def save_note(author_name, author_slack_id, filename, raw_content, summary, topics, embedding):
+def save_note(author_name, author_slack_id, filename, raw_content, summary, topics):
     """Save a processed research note to Supabase via REST API."""
     data = {
         "author_name": author_name,
@@ -24,8 +24,7 @@ def save_note(author_name, author_slack_id, filename, raw_content, summary, topi
         "filename": filename,
         "raw_content": raw_content,
         "summary": summary,
-        "topics": topics,
-        "embedding": embedding
+        "topics": topics
     }
     response = requests.post(
         f"{SUPABASE_URL}/rest/v1/research_notes",
@@ -36,19 +35,38 @@ def save_note(author_name, author_slack_id, filename, raw_content, summary, topi
     return response.json()
 
 
-def search_notes(query_embedding: list, match_count: int = 5) -> list:
-    """Semantic search using pgvector via Supabase RPC."""
-    response = requests.post(
-        f"{SUPABASE_URL}/rest/v1/rpc/match_notes",
-        headers=HEADERS,
-        json={
-            "query_embedding": query_embedding,
-            "match_threshold": 0.4,
-            "match_count": match_count
+def search_notes(query_text: str, match_count: int = 5) -> list:
+    """Full-text search using PostgreSQL tsvector via Supabase REST API."""
+    # Use Supabase's built-in full-text search
+    search_headers = {**HEADERS, "Prefer": ""}
+    response = requests.get(
+        f"{SUPABASE_URL}/rest/v1/research_notes",
+        headers=search_headers,
+        params={
+            "select": "id,author_name,filename,summary,topics,created_at",
+            "search_vector": f"fts.{query_text}",
+            "limit": match_count,
+            "order": "created_at.desc"
         }
     )
     response.raise_for_status()
-    return response.json() if response.json() else []
+    results = response.json()
+
+    # Fallback: if fts returns nothing, do a simple ilike search on summary
+    if not results:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/research_notes",
+            headers=search_headers,
+            params={
+                "select": "id,author_name,filename,summary,topics,created_at",
+                "summary": f"ilike.*{query_text}*",
+                "limit": match_count
+            }
+        )
+        response.raise_for_status()
+        results = response.json()
+
+    return results if results else []
 
 
 def get_all_topics() -> list:
